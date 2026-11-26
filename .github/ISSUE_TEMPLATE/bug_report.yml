@@ -1,0 +1,54 @@
+name: Bug report
+description: A job, workflow, schedule, migration or the run ledger behaves differently from the docs.
+title: 'bug: '
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: '@yieldkit/jobs version'
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: effect
+    attributes:
+      label: effect, @effect/sql-pg and @yieldkit/pg versions
+      placeholder: 4.1.6, 4.1.6, 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: postgres
+    attributes:
+      label: PostgreSQL version and hosting
+      description: For example 18.1 in Docker, or a managed service, and whether a pooler such as PgBouncer sits in between.
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime and entry point
+      placeholder: Node.js 24.11.0 with @effect/platform-node 4.1.6
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: The smallest program that shows the problem, with the job definition, storage options and layer setup. Use made-up connection strings and passwords.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: The error, log lines, outcome or ledger rows you got.
+    validations:
+      required: true
