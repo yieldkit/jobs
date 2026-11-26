@@ -3,7 +3,6 @@ import type { WorkflowEngine } from 'effect/workflow';
 
 import { Effect, Layer, Schema } from 'effect';
 import { SecureRandom } from 'effect/crypto';
-import { TestClock } from 'effect/testing';
 import { describe, expect, it } from 'vite-plus/test';
 
 import type { AnyJobDefinition } from './job.ts';
@@ -14,6 +13,7 @@ import { dispatchApiJobWorkflow, dispatchJob } from './dispatch.ts';
 import { defineJob } from './job.ts';
 import { makeJobRunsMemory } from './ledger-memory.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 import { makeAnyJobWorkflowLayer } from './workflow.ts';
 
 /**
@@ -68,7 +68,7 @@ const outcomeOf = <E extends { readonly _tag: string }>(
       Effect.provide(Layer.mergeAll(cluster, handler, requests.layer, SecureRandom.layerWebCrypto)),
     );
     return { result, requests: requests.rows().map((row) => row.params) };
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+  }).pipe(Effect.scoped, Effect.provide(testRuntimeLayer), Effect.runPromise);
 
 describe('dispatchJob', () => {
   it('rejects a delay holding a number that is not finite', async () => {

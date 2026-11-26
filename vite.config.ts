@@ -17,6 +17,14 @@ const integrationTests = 'src/**/*.integration.test.ts';
  */
 const INTEGRATION_TIMEOUT_MS = 300_000;
 
+/**
+ * Per-test limit for the unit suite. The tests drive the in-memory Cluster on `TestClock`, which
+ * waits in real time for each woken workflow to suspend (see `src/test-runtime.fixture.ts` and
+ * `src/digest.setup.ts`); with every test file running in parallel on a small CI runner, a test can
+ * take well over the default 5 seconds without anything being wrong.
+ */
+const UNIT_TIMEOUT_MS = 60_000;
+
 export default defineConfig({
   pack: {
     entry: ['src/index.ts', 'src/testing/index.ts'],
@@ -83,6 +91,8 @@ export default defineConfig({
           name: 'unit',
           include: ['src/**/*.test.ts'],
           exclude: [integrationTests],
+          setupFiles: ['src/digest.setup.ts'],
+          testTimeout: UNIT_TIMEOUT_MS,
         },
       },
       {

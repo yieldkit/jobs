@@ -14,6 +14,7 @@ import { clusterPruneTargetsFor } from './maintenance.ts';
 import { defaultJobsPolicy, resolveJobsPolicy } from './policy.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
 import { makeSchedulerLayer } from './scheduler.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 
 /**
  * A job on `cadence` that succeeds at once.
@@ -108,7 +109,7 @@ describe('maintenance', () => {
         .rows()
         .map((row) => `${row.job}/${row.runKey}`)
         .toSorted();
-    }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+    }).pipe(Effect.scoped, Effect.provide(testRuntimeLayer), Effect.runPromise);
     expect(rows).toEqual(['mailer/young', 'sync/1970-01-01T00:00Z']);
   });
 });

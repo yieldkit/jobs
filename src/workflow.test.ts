@@ -23,6 +23,7 @@ import { defaultJobsPolicy } from './policy.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
 import { JobRequests } from './requests.ts';
 import { runJob } from './run.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 import {
   WorkerJobParams,
   dispatchApiJobWorkflow,
@@ -168,6 +169,7 @@ const runWorkflowScenario = <A>(
     readonly requests?: Layer.Layer<JobRequests>;
     readonly policy?: JobsPolicyOverrides;
     readonly logger?: Layer.Layer<never>;
+    readonly testClock?: Layer.Layer<TestClock.TestClock>;
   } = {},
 ): Promise<A> =>
   Effect.runPromise(
@@ -187,7 +189,11 @@ const runWorkflowScenario = <A>(
         const env = Layer.mergeAll(clusterLayer, memory.layer, workflowLayer);
         return yield* scenario(memory).pipe(Effect.provide(env));
       }),
-    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), options.logger ?? Layer.empty))),
+    ).pipe(
+      Effect.provide(
+        Layer.merge(options.testClock ?? testRuntimeLayer, options.logger ?? Layer.empty),
+      ),
+    ),
   );
 
 describe('durable job workflows', () => {
@@ -283,7 +289,7 @@ describe('durable job workflows', () => {
             return { result, rows: runsMemory.rows(), settles: runsMemory.settles() };
           }).pipe(Effect.provide(env));
         }),
-      ).pipe(Effect.provide(TestClock.layer())),
+      ).pipe(Effect.provide(testRuntimeLayer)),
     );
     expect(outcome.result).toMatchObject({
       status: 'completed',
@@ -366,7 +372,7 @@ describe('durable job workflows', () => {
             return { result, rows: runsMemory.rows(), settles: runsMemory.settles() };
           }).pipe(Effect.provide(env));
         }),
-      ).pipe(Effect.provide(TestClock.layer())),
+      ).pipe(Effect.provide(testRuntimeLayer)),
     );
     expect(outcome.result.status).toBe('failed');
     expect(stageAttempts).toBe(MAX_SCHEDULED_DAILY_FAILURES);
@@ -455,7 +461,7 @@ describe('durable job workflows', () => {
             return yield* Fiber.join(fiber);
           }).pipe(Effect.provide(env));
         }),
-      ).pipe(Effect.provide(TestClock.layer())),
+      ).pipe(Effect.provide(testRuntimeLayer)),
     );
     expect(outcome.status).toBe('completed');
     expect(bodyCalls).toBe(1);
@@ -1448,30 +1454,36 @@ describe('durable job workflows', () => {
       stats: StageCountSchema,
       run: () => suspendingBody,
     });
-    const outcome = await runWorkflowScenario(job, () =>
-      Effect.gen(function* () {
-        const fiber = yield* makeJobWorkflow(job)
-          .execute({ ...scheduledPayload('2026-11-25'), trigger: 'api', attemptNonce: 'api-1' })
-          .pipe(Effect.forkChild);
-        yield* Deferred.await(started);
-        yield* TestClock.adjust('1 second');
-        yield* TestClock.adjust('3 minutes');
-        yield* JobRuns.use((runs) =>
-          runs.claim({
-            job: job.name,
-            runKey: '2026-11-25',
-            trigger: 'manual',
-            force: false,
-            params: {},
-            executionId: 'manual-execution',
-          }),
-        ).pipe(Effect.orDie);
-        for (let minute = 0; minute < 20; minute += 1) {
-          yield* TestClock.adjust('1 minute');
-        }
+    const outcome = await runWorkflowScenario(
+      job,
+      () =>
+        Effect.gen(function* () {
+          const fiber = yield* makeJobWorkflow(job)
+            .execute({ ...scheduledPayload('2026-11-25'), trigger: 'api', attemptNonce: 'api-1' })
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* TestClock.adjust('1 second');
+          yield* TestClock.adjust('3 minutes');
+          yield* JobRuns.use((runs) =>
+            runs.claim({
+              job: job.name,
+              runKey: '2026-11-25',
+              trigger: 'manual',
+              force: false,
+              params: {},
+              executionId: 'manual-execution',
+            }),
+          ).pipe(Effect.orDie);
+          for (let minute = 0; minute < 20; minute += 1) {
+            yield* TestClock.adjust('1 minute');
+          }
 
-        return yield* Fiber.join(fiber);
-      }),
+          return yield* Fiber.join(fiber);
+        }),
+      // The interrupted body's 5-minute durable sleep still fires after the run lost its key, and
+      // the in-memory cluster keeps that wake-up running without suspending. The default 1-second
+      // TestClock wait lets the clock move past it, as the test intends.
+      { testClock: TestClock.layer() },
     );
     expect(outcome).toMatchObject({ status: 'failed', errorTag: 'RunClaimLost' });
     expect(calls).toEqual({ starts: 1, writes: 0 });

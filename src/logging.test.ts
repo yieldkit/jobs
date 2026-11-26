@@ -7,6 +7,7 @@ import { TestClock } from 'effect/testing';
 import { describe, expect, it } from 'vite-plus/test';
 
 import { withJobContext, withJobLogging, withJobStage } from './logging.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 
 class UpstreamTestError extends Data.TaggedError('UpstreamTestError')<{
   readonly message: string;
@@ -43,7 +44,7 @@ describe('job logging', () => {
         return yield* Fiber.join(running);
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(harness.layer, TestClock.layer(), SecureRandom.layerWebCrypto),
+          Layer.mergeAll(harness.layer, testRuntimeLayer, SecureRandom.layerWebCrypto),
         ),
       ),
     );

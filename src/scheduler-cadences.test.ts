@@ -16,6 +16,7 @@ import { defineJob } from './job.ts';
 import { makeJobRunsMemory } from './ledger-memory.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
 import { makeSchedulerLayer } from './scheduler.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 import { dispatchJob } from './workflow.ts';
 
 /**
@@ -82,7 +83,7 @@ const rowsOverTime = (options: {
     }
 
     return seen;
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+  }).pipe(Effect.scoped, Effect.provide(testRuntimeLayer), Effect.runPromise);
 
 /**
  * The error `makeSchedulerLayer` fails with for one job on `cadence`.
@@ -326,7 +327,7 @@ describe('scheduler cadences', () => {
       }
 
       return runs.rows().map((row) => `${row.runKey}/${row.status}`);
-    }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+    }).pipe(Effect.scoped, Effect.provide(testRuntimeLayer), Effect.runPromise);
     expect(failed).toBe(true);
     expect(keys.toSorted()).toEqual([
       '2026-11-26T09:00Z/completed',

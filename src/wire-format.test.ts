@@ -17,6 +17,7 @@ import { makeJobRunsMemory } from './ledger-memory.ts';
 import { JobRuns } from './ledger.ts';
 import { defaultJobsPolicy } from './policy.ts';
 import { clusterPruneTargetsFor } from './scheduler.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 import {
   JobOutcomeSchema,
   JobWorkflowPayload as JobWorkflowPayloadSchema,
@@ -116,7 +117,7 @@ const runWorkflow = <Name extends string, P, S, E, PE>(
           return { outcome, executionId, journal: driver.journal.map(toJournalEntry) };
         }).pipe(Effect.provide(env));
       }),
-    ).pipe(Effect.provide(TestClock.layer())),
+    ).pipe(Effect.provide(testRuntimeLayer)),
   );
 
 const StageCount = Schema.Struct({ count: Schema.Int });
