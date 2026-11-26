@@ -5,6 +5,7 @@ import { TestClock } from 'effect/testing';
 import { describe, expect, it } from 'vite-plus/test';
 
 import { raceWithLeaseRenewal, retryTransientSql } from './run-support.ts';
+import { testClockLayer } from './test-clock.fixture.ts';
 
 /**
  * What `@effect/sql-pg` builds when a demoted primary refuses a write (SQLSTATE 25006).
@@ -31,7 +32,7 @@ const runFailing = (failures: number) =>
     yield* TestClock.adjust('1 minute');
     const exit = yield* Fiber.join(fiber);
     return { exit, calls };
-  }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
+  }).pipe(Effect.provide(testClockLayer), Effect.runPromise);
 
 describe('retryTransientSql', () => {
   it('retries any SqlError five times, then gives up', async () => {
@@ -72,7 +73,7 @@ describe('raceWithLeaseRenewal', () => {
 
       return fiber.pollUnsafe();
     }).pipe(
-      Effect.provide(Layer.merge(TestClock.layer(), makeTestLogger({ minLevel: 'Fatal' }).layer)),
+      Effect.provide(Layer.merge(testClockLayer, makeTestLogger({ minLevel: 'Fatal' }).layer)),
       Effect.runPromise,
     );
     expect(exit).toMatchObject({ _tag: 'Success', value: { _tag: 'Failure' } });

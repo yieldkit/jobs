@@ -7,6 +7,7 @@ import { TestClock } from 'effect/testing';
 import { describe, expect, it } from 'vite-plus/test';
 
 import { withJobContext, withJobLogging, withJobStage } from './logging.ts';
+import { testClockLayer } from './test-clock.fixture.ts';
 
 class UpstreamTestError extends Data.TaggedError('UpstreamTestError')<{
   readonly message: string;
@@ -42,9 +43,7 @@ describe('job logging', () => {
         yield* TestClock.adjust(Duration.millis(250));
         return yield* Fiber.join(running);
       }).pipe(
-        Effect.provide(
-          Layer.mergeAll(harness.layer, TestClock.layer(), SecureRandom.layerWebCrypto),
-        ),
+        Effect.provide(Layer.mergeAll(harness.layer, testClockLayer, SecureRandom.layerWebCrypto)),
       ),
     );
     expect(result).toEqual({ itemCount: 30, newItemCount: 5 });

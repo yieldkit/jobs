@@ -24,6 +24,7 @@ import { makeJobRunsMemory } from './ledger-memory.ts';
 import { JobRuns } from './ledger.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
 import { makeSchedulerLayer, selectWorkerJobs } from './scheduler.ts';
+import { testClockLayer } from './test-clock.fixture.ts';
 
 const EmptyParams = { schema: Schema.Struct({}), defaults: {} };
 const EmptyStats = Schema.Struct({});
@@ -176,7 +177,7 @@ const ledgerRowsAfterSweep = (options: {
     yield* Effect.yieldNow;
     yield* TestClock.adjust(options.after);
     return runs.rows().map((row) => `${row.job}/${row.runKey}`);
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+  }).pipe(Effect.scoped, Effect.provide(testClockLayer), Effect.runPromise);
 };
 
 describe('Effect Cluster scheduler and shard groups', () => {
@@ -366,7 +367,7 @@ describe('Effect Cluster scheduler and shard groups', () => {
 
           return { afterOneDay, remaining: requests.rows().map((row) => row.executionId) };
         }),
-      ).pipe(Effect.provide(TestClock.layer())),
+      ).pipe(Effect.provide(testClockLayer)),
     );
     expect(rows.afterOneDay).toBe(3);
     expect(rows.remaining).toEqual(['pending']);
@@ -419,7 +420,7 @@ describe('Effect Cluster scheduler and shard groups', () => {
       }
 
       return runs.rows();
-    }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+    }).pipe(Effect.scoped, Effect.provide(testClockLayer), Effect.runPromise);
     expect(executes).toBe(2);
     expect(rows).toMatchObject([{ job: 'initial-import', runKey: 'once', status: 'completed' }]);
   });

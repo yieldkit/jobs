@@ -27,6 +27,7 @@ import { defineJob } from './job.ts';
 import { makeJobRunsMemory } from './ledger-memory.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
 import { makeSchedulerLayer } from './scheduler.ts';
+import { testClockLayer } from './test-clock.fixture.ts';
 
 /**
  * A job on `cadence` that succeeds at once.
@@ -90,7 +91,7 @@ const cronRunsWithFlakyDispatch = (options: {
     );
     yield* advanceTo(options.untilIso, '30 seconds');
     return runs.rows().map((row) => `${row.runKey}/${row.status}`);
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+  }).pipe(Effect.scoped, Effect.provide(testClockLayer), Effect.runPromise);
 };
 
 /**
@@ -149,7 +150,7 @@ const rowsAfterLateTick = (catchUpWithin: Duration.Input) => {
     yield* startWorker(yield* Effect.scope);
     yield* advanceTo('2026-11-26T09:35:00Z', '1 minute');
     return runs.rows().map((row) => `${row.runKey}/${row.status}`);
-  }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
+  }).pipe(Effect.scoped, Effect.provide(testClockLayer), Effect.runPromise);
 };
 
 describe('Cron scheduling', () => {
