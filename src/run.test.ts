@@ -15,7 +15,7 @@ import { JobRuns } from './ledger.ts';
 import { defaultJobsPolicy } from './policy.ts';
 import { raceWithLeaseRenewal } from './run-support.ts';
 import { runJob } from './run.ts';
-import { testClockLayer } from './test-clock.fixture.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 
 const MAX_SCHEDULED_DAILY_FAILURES = defaultJobsPolicy.retry.dailyMaxFailures;
 const TEST_ANNOTATIONS = Context.make(JobLabel, 'test-label');
@@ -80,7 +80,7 @@ const runWithTestClock = <A, E>(
       return yield* effect;
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(quietLogger.layer, testClockLayer, SecureRandom.layerWebCrypto),
+        Layer.mergeAll(quietLogger.layer, testRuntimeLayer, SecureRandom.layerWebCrypto),
       ),
     ),
   );
@@ -697,7 +697,7 @@ describe('runJob', () => {
 
       return fiber.pollUnsafe();
     }).pipe(
-      Effect.provide(Layer.merge(testClockLayer, makeTestLogger({ minLevel: 'Fatal' }).layer)),
+      Effect.provide(Layer.merge(testRuntimeLayer, makeTestLogger({ minLevel: 'Fatal' }).layer)),
       Effect.runPromise,
     );
     expect(exit).toMatchObject({ _tag: 'Success', value: { _tag: 'Failure' } });
@@ -724,7 +724,7 @@ describe('runJob', () => {
 
       return fiber.pollUnsafe();
     }).pipe(
-      Effect.provide(Layer.merge(testClockLayer, makeTestLogger({ minLevel: 'Fatal' }).layer)),
+      Effect.provide(Layer.merge(testRuntimeLayer, makeTestLogger({ minLevel: 'Fatal' }).layer)),
       Effect.runPromise,
     );
     expect(exit).toMatchObject({ _tag: 'Success', value: { _tag: 'Failure' } });

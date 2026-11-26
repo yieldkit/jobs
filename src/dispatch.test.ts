@@ -13,7 +13,7 @@ import { dispatchApiJobWorkflow, dispatchJob } from './dispatch.ts';
 import { defineJob } from './job.ts';
 import { makeJobRunsMemory } from './ledger-memory.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
-import { testClockLayer } from './test-clock.fixture.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 import { makeAnyJobWorkflowLayer } from './workflow.ts';
 
 /**
@@ -68,7 +68,7 @@ const outcomeOf = <E extends { readonly _tag: string }>(
       Effect.provide(Layer.mergeAll(cluster, handler, requests.layer, SecureRandom.layerWebCrypto)),
     );
     return { result, requests: requests.rows().map((row) => row.params) };
-  }).pipe(Effect.scoped, Effect.provide(testClockLayer), Effect.runPromise);
+  }).pipe(Effect.scoped, Effect.provide(testRuntimeLayer), Effect.runPromise);
 
 describe('dispatchJob', () => {
   it('rejects a delay holding a number that is not finite', async () => {

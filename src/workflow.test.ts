@@ -23,7 +23,7 @@ import { defaultJobsPolicy } from './policy.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
 import { JobRequests } from './requests.ts';
 import { runJob } from './run.ts';
-import { testClockLayer } from './test-clock.fixture.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 import {
   WorkerJobParams,
   dispatchApiJobWorkflow,
@@ -191,7 +191,7 @@ const runWorkflowScenario = <A>(
       }),
     ).pipe(
       Effect.provide(
-        Layer.merge(options.testClock ?? testClockLayer, options.logger ?? Layer.empty),
+        Layer.merge(options.testClock ?? testRuntimeLayer, options.logger ?? Layer.empty),
       ),
     ),
   );
@@ -289,7 +289,7 @@ describe('durable job workflows', () => {
             return { result, rows: runsMemory.rows(), settles: runsMemory.settles() };
           }).pipe(Effect.provide(env));
         }),
-      ).pipe(Effect.provide(testClockLayer)),
+      ).pipe(Effect.provide(testRuntimeLayer)),
     );
     expect(outcome.result).toMatchObject({
       status: 'completed',
@@ -372,7 +372,7 @@ describe('durable job workflows', () => {
             return { result, rows: runsMemory.rows(), settles: runsMemory.settles() };
           }).pipe(Effect.provide(env));
         }),
-      ).pipe(Effect.provide(testClockLayer)),
+      ).pipe(Effect.provide(testRuntimeLayer)),
     );
     expect(outcome.result.status).toBe('failed');
     expect(stageAttempts).toBe(MAX_SCHEDULED_DAILY_FAILURES);
@@ -461,7 +461,7 @@ describe('durable job workflows', () => {
             return yield* Fiber.join(fiber);
           }).pipe(Effect.provide(env));
         }),
-      ).pipe(Effect.provide(testClockLayer)),
+      ).pipe(Effect.provide(testRuntimeLayer)),
     );
     expect(outcome.status).toBe('completed');
     expect(bodyCalls).toBe(1);

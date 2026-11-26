@@ -20,7 +20,7 @@ import { JobRuns } from './ledger.ts';
 import { makeJobRequestsMemory } from './requests-memory.ts';
 import { runJob } from './run.ts';
 import { makeSchedulerLayer } from './scheduler.ts';
-import { testClockLayer } from './test-clock.fixture.ts';
+import { testRuntimeLayer } from './test-runtime.fixture.ts';
 import {
   dispatchApiJobWorkflow,
   dispatchJob,
@@ -123,7 +123,7 @@ const runScenario = <A, E>(
         const env = Layer.mergeAll(cluster, memory.layer, workflow);
         return yield* Effect.provide(scenario(memory), env);
       }),
-    ).pipe(Effect.provide(testClockLayer)),
+    ).pipe(Effect.provide(testRuntimeLayer)),
   );
 
 /**
@@ -173,7 +173,7 @@ const runWorker = (options: {
     }
 
     return runs.rows();
-  }).pipe(Effect.scoped, Effect.provide(testClockLayer), Effect.runPromise);
+  }).pipe(Effect.scoped, Effect.provide(testRuntimeLayer), Effect.runPromise);
 
 /**
  * A scheduled payload for `runKey`.
