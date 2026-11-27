@@ -16,7 +16,7 @@ You own the Cluster: its tables, schema, prefix, transport, serialization and mi
 pnpm add @yieldkit/jobs @yieldkit/pg @effect/sql-pg effect
 ```
 
-`effect` and `@effect/sql-pg` 4.1.6 or a later 4.1 patch are peer dependencies; a new Effect minor needs a new release, since the package builds on Effect's unstable Cluster, Workflow and SQL modules. Your runner also needs a platform package such as `@effect/platform-node`. Runs on Node.js 22.18+, 24.11+ and 26+, and on Bun, against PostgreSQL 15 to 19.
+`effect` and `@effect/sql-pg` 4.1.7 or a later 4.1 patch are peer dependencies; a new Effect minor needs a new release, since the package builds on Effect's unstable Cluster, Workflow and SQL modules. Your runner also needs a platform package such as `@effect/platform-node`. Runs on Node.js 22.18+, 24.11+ and 26+, and on Bun, against PostgreSQL 15 to 19.
 
 | Import                   | Contents                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
