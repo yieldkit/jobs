@@ -1,6 +1,6 @@
 # Deployment: several workers and high availability
 
-Run as many workers as you like against one PostgreSQL database. They form one Effect Cluster: PostgreSQL holds the membership, shard locks and messages, and workers call each other over HTTP only to deliver work sooner. Most of this page is Effect Cluster 4.1.6 behaviour; the library adds the run ledger.
+Run as many workers as you like against one PostgreSQL database. They form one Effect Cluster: PostgreSQL holds the membership, shard locks and messages, and workers call each other over HTTP only to deliver work sooner. Most of this page is Effect Cluster 4.1.7 behaviour; the library adds the run ledger.
 
 ## The moving parts
 
