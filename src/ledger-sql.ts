@@ -2,19 +2,13 @@ import type { SqlClient, SqlError } from 'effect/sql';
 
 import { Effect, Schema } from 'effect';
 
-import type {
-  ClaimRequest,
-  OwnedRun,
-  RecentRunsQuery,
-  RunClaim,
-  RunResult,
-} from './ledger-types.ts';
+import type { ClaimRequest, OwnedRun, RunClaim, RunResult } from './ledger-types.ts';
 import type { RetryPolicy } from './policy.ts';
 import type { BoundSettleHook } from './settle-hook.ts';
 
 import { failedNextAttemptAt } from './ledger-retry.ts';
 import { refusePastDeadlineSql } from './ledger-sql-deadline.ts';
-import { JobRunRecord, JobRunStatus } from './ledger-types.ts';
+import { JobRunStatus } from './ledger-types.ts';
 import { decideClaim } from './policy.ts';
 import { runSettleHook } from './settle-hook.ts';
 
@@ -431,43 +425,3 @@ export const isRunCompletedSql = (
       AND run_key = ${runKey}
       AND status = 'completed'
   `.pipe(Effect.map((rows) => rows.length > 0));
-
-/**
- * Queries recent run ledger rows ordered newest first, optionally filtered to one job. A row that
- * fails to decode as `JobRunRecord` dies: it means the table and the schema disagree, a bug rather
- * than a failure the caller can handle.
- */
-export const queryRecentRunsSql = (
-  { sql, runsTable }: SqlLedgerContext,
-  query: RecentRunsQuery,
-): Effect.Effect<ReadonlyArray<JobRunRecord>, SqlError.SqlError> => {
-  const limit = Math.max(0, Math.trunc(query.limit));
-  if (limit === 0) {
-    return Effect.succeed([]);
-  }
-
-  const jobFilter = query.job === undefined ? sql`` : sql`WHERE job = ${query.job}`;
-  return Effect.gen(function* () {
-    const rows = yield* sql`
-      SELECT
-        job,
-        run_key AS "runKey",
-        execution_id AS "executionId",
-        status,
-        attempt,
-        failures,
-        next_attempt_at AS "nextAttemptAt",
-        trigger,
-        params,
-        stats,
-        error_message AS "errorMessage",
-        started_at AS "startedAt",
-        finished_at AS "finishedAt"
-      FROM ${sql(runsTable)}
-      ${jobFilter}
-      ORDER BY started_at DESC, run_key DESC
-      LIMIT ${limit}
-    `;
-    return yield* Schema.decodeUnknownEffect(Schema.Array(JobRunRecord))(rows).pipe(Effect.orDie);
-  });
-};

@@ -94,21 +94,29 @@ export const StorageLive = JobStorage.layerStorage({ onSettle: recordHealth });
 import { JobRuns } from '@yieldkit/jobs';
 import { Effect } from 'effect';
 
-export const latestRuns = Effect.gen(function* () {
-  const runs = yield* JobRuns;
-  return yield* runs.recent({ job: 'sync-orders', limit: 20 }); // newest first, as JobRunRecord
-});
+export const runHistory = (cursor?: string) =>
+  Effect.gen(function* () {
+    const runs = yield* JobRuns;
+    const job = 'sync-orders';
+    const run = yield* runs.get({ job, runKey: '2026-11-25T10:00Z' });
+    const page = yield* runs.page({ job, limit: 20, cursor });
+    return { run, page };
+  });
 ```
 
-| Member                     | Does                                                                                                                                          |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claim(request)`           | Takes `(job, runKey)` and returns `Acquired` with a fence token, or why not: `Busy`, `Completed`, `AlreadySettled`, `RetryLater`, `Exhausted` |
-| `heartbeat(run)`           | Extends the lease; `false` when another attempt owns the key                                                                                  |
-| `settle(run, result)`      | Fenced update plus the hook; `false` when the claim was lost                                                                                  |
-| `isCompleted(job, runKey)` | Whether the key is completed                                                                                                                  |
-| `recent({ job?, limit })`  | Newest rows first, as `JobRunRecord`                                                                                                          |
-| `prune(jobs, olderThan)`   | Deletes rows of `jobs` that started before the cutoff, `maintenance.batchSize` rows per statement                                             |
-| `leaseDuration`, `policy`  | The lease and the resolved [policy](policy.md)                                                                                                |
+| Member                           | Does                                                                                                                                          |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claim(request)`                 | Takes `(job, runKey)` and returns `Acquired` with a fence token, or why not: `Busy`, `Completed`, `AlreadySettled`, `RetryLater`, `Exhausted` |
+| `heartbeat(run)`                 | Extends the lease; `false` when another attempt owns the key                                                                                  |
+| `settle(run, result)`            | Fenced update plus the hook; `false` when the claim was lost                                                                                  |
+| `isCompleted(job, runKey)`       | Whether the key is completed                                                                                                                  |
+| `get({ job, runKey })`           | `Option<JobRunRecord>` for the key                                                                                                            |
+| `recent({ job?, limit })`        | Newest rows first, as `JobRunRecord`                                                                                                          |
+| `page({ job?, limit, cursor? })` | Newest rows first with an opaque continuation cursor                                                                                          |
+| `prune(jobs, olderThan)`         | Deletes rows of `jobs` that started before the cutoff, `maintenance.batchSize` rows per statement                                             |
+| `leaseDuration`, `policy`        | The lease and the resolved [policy](policy.md)                                                                                                |
+
+`page` and `recent` order rows by start time, then run key, then job, all descending, comparing text bytewise (`COLLATE "C"` on a UTF-8 database) for ties. Pass the returned `nextCursor` with the same job filter to continue. An empty page or the last page returns `nextCursor: null`. A malformed cursor fails with `InvalidRunCursor`. `page` reads live ledger state, so a run reclaimed while walking can move ahead of an existing cursor; run the walk inside a single `REPEATABLE READ` transaction when you need a point-in-time snapshot. An undecodable ledger row is a defect in all three read methods.
 
 A claim with the same workflow `executionId` resumes its own `running` row after a crash, with a fresh token. Heartbeats and settles match the token, so a stale process never overwrites a newer owner.
 

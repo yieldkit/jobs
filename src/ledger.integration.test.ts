@@ -11,6 +11,7 @@ import {
   Effect,
   Exit,
   Layer,
+  Option,
   Result,
   Schedule,
   Schema,
@@ -21,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 
 import type { JobSettled, OwnedRun, RunClaim } from './ledger-types.ts';
 
+import { InvalidRunCursor } from './errors.ts';
 import {
   appPool,
   migrateJobs,
@@ -48,10 +50,10 @@ const JobKeyRow = Schema.Struct({
 /**
  * The ledger with a one-second lease on an application pool, logs silenced.
  */
-const buildTestLayer = (url: Redacted.Redacted) =>
+const buildTestLayer = (url: Redacted.Redacted, prefix?: string) =>
   Layer.mergeAll(
     appPool(url),
-    layerStorage({ policy: { lease: { duration: TEST_LEASE_DURATION } } }).pipe(
+    layerStorage({ prefix, policy: { lease: { duration: TEST_LEASE_DURATION } } }).pipe(
       Layer.provide(appPool(url)),
     ),
     quietLogger,
@@ -62,7 +64,8 @@ let testLayer: ReturnType<typeof buildTestLayer>;
 
 const runDb = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<ReturnType<typeof buildTestLayer>>>,
-): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer), Effect.scoped));
+  layer = testLayer,
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(layer), Effect.scoped));
 
 /**
  * Retried by `pollUntilAcquired` while another claim's lease on the key has not yet expired.
@@ -122,6 +125,239 @@ afterAll(async () => {
 });
 
 describe('JobRuns SQL ledger', () => {
+  it('looks up a run by both job and run key', async () => {
+    const result = await runDb(
+      Effect.gen(function* () {
+        const runs = yield* JobRuns;
+        const key = { job: 'lookup', runKey: 'same' };
+        yield* runs.claim({ ...key, trigger: 'manual', force: false, params: { limit: 2 } });
+        const hit = yield* runs.get(key);
+        const wrongJob = yield* runs.get({ ...key, job: 'other' });
+        const wrongKey = yield* runs.get({ ...key, runKey: 'other' });
+        return { hit, wrongJob, wrongKey };
+      }),
+    );
+    expect(Option.getOrUndefined(result.hit)).toMatchObject({
+      job: 'lookup',
+      runKey: 'same',
+      status: 'running',
+      params: { limit: 2 },
+    });
+    expect(result.wrongJob).toEqual(Option.none());
+    expect(result.wrongKey).toEqual(Option.none());
+  });
+
+  it('pages tied start times at microsecond precision and filters history by job', async () => {
+    const url = postgres.connectionUri;
+    const prefix = 'history';
+    await migrateJobs(url, { prefix });
+    const result = await runDb(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        // Every timestamp in this fixture rounds to the same JavaScript Date.
+        yield* sql`
+          INSERT INTO public.history_runs
+            (job, run_key, status, claim_token, lease_expires_at, trigger, started_at)
+          SELECT job, run_key, 'running', gen_random_uuid(), NOW(), 'manual',
+                 started_at::timestamptz
+          FROM (VALUES
+            ('beta',  'zzz-old', '2026-11-25 00:00:00.123100+00'),
+            ('alpha', 'same',    '2026-11-25 00:00:00.123567+00'),
+            ('alpha', 'aa',      '2026-11-25 00:00:00.123567+00'),
+            ('beta',  'same',    '2026-11-25 00:00:00.123567+00'),
+            ('alpha', 'zz',      '2026-11-25 00:00:00.123567+00')
+          ) AS seed(job, run_key, started_at)
+        `;
+        const runs = yield* JobRuns;
+        const first = yield* runs.page({ limit: 2 });
+        yield* sql`
+          INSERT INTO public.history_runs
+            (job, run_key, status, claim_token, lease_expires_at, trigger, started_at)
+          VALUES ('beta', 'new', 'running', gen_random_uuid(), NOW(), 'manual',
+                  '2026-11-25 00:00:00.123800+00')
+        `;
+        const second = yield* runs.page({ limit: 2, cursor: first.nextCursor ?? undefined });
+        const third = yield* runs.page({ limit: 2, cursor: second.nextCursor ?? undefined });
+        const filtered = yield* runs.page({ job: 'alpha', limit: 2 });
+        const filteredTail = yield* runs.page({
+          job: 'alpha',
+          limit: 2,
+          cursor: filtered.nextCursor ?? undefined,
+        });
+        const empty = yield* runs.page({ job: 'missing', limit: 2 });
+        return { first, second, third, filtered, filteredTail, empty };
+      }),
+      buildTestLayer(url, prefix),
+    );
+    expect(result.first.runs).toMatchObject([
+      { job: 'alpha', runKey: 'zz' },
+      { job: 'beta', runKey: 'same' },
+    ]);
+    expect(result.second.runs).toMatchObject([
+      { job: 'alpha', runKey: 'same' },
+      { job: 'alpha', runKey: 'aa' },
+    ]);
+    expect(result.third.runs).toMatchObject([{ job: 'beta', runKey: 'zzz-old' }]);
+    expect(result.third.nextCursor).toBeNull();
+    expect(result.filtered.runs.map(({ runKey }) => runKey)).toEqual(['zz', 'same']);
+    expect(result.filteredTail.runs.map(({ runKey }) => runKey)).toEqual(['aa']);
+    expect(result.filteredTail.nextCursor).toBeNull();
+    expect(result.empty).toEqual({ runs: [], nextCursor: null });
+  });
+
+  it('fails with typed InvalidRunCursor for malformed cursors', async () => {
+    const encodeBase64Url = Schema.encodeSync(Schema.StringFromBase64Url);
+    const encodeBytesBase64Url = Schema.encodeSync(Schema.Uint8ArrayFromBase64Url);
+    const invalidUtf8 = encodeBytesBase64Url(
+      new Uint8Array([
+        ...new TextEncoder().encode('{"job":"alpha","runKey":"'),
+        0xff,
+        ...new TextEncoder().encode('","startedAtMicros":"0"}'),
+      ]),
+    );
+    const cursors = [
+      '???',
+      invalidUtf8,
+      encodeBase64Url(String.raw`{"job":"alpha","runKey":"a\u0000b","startedAtMicros":"0"}`),
+      encodeBase64Url(String.raw`{"job":"alpha","runKey":"\ud800","startedAtMicros":"0"}`),
+      encodeBase64Url('{"job":"alpha","runKey":"same","startedAtMicros":"-211813488000000001"}'),
+    ];
+    const outcomes = await runDb(
+      JobRuns.use((runs) =>
+        Effect.forEach(cursors, (cursor) => Effect.result(runs.page({ limit: 2, cursor }))),
+      ),
+    );
+    for (const outcome of outcomes) {
+      const failure = Result.isFailure(outcome) ? outcome.failure : undefined;
+      expect(failure?._tag).toBe('InvalidRunCursor');
+      expect(Schema.is(InvalidRunCursor)(failure)).toBe(true);
+    }
+  });
+
+  it('orders ties bytewise across page boundaries, exact final pages, year 2300, and recent', async () => {
+    const url = postgres.connectionUri;
+    const prefix = 'history_edge';
+    await migrateJobs(url, { prefix });
+    const result = await runDb(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+          INSERT INTO public.history_edge_runs
+            (job, run_key, status, claim_token, lease_expires_at, trigger, started_at)
+          SELECT job, run_key, 'running', gen_random_uuid(), NOW(), 'manual',
+                 started_at::timestamptz
+          FROM (VALUES
+            ('utf8',  'Z',         '2026-11-25 00:00:00.000000+00'),
+            ('utf8',  'a',         '2026-11-25 00:00:00.000000+00'),
+            ('utf8',  E'\\ue000',   '2026-11-25 00:00:00.000000+00'),
+            ('utf8',  E'\\U0001f600', '2026-11-25 00:00:00.000000+00'),
+            ('far',   'micro1',    '2300-01-01 00:00:00.000001+00'),
+            ('far',   'micro0',    '2300-01-01 00:00:00.000000+00'),
+            ('alpha', 'tie',       '2026-11-26 00:00:00.000000+00'),
+            ('beta',  'tie',       '2026-11-26 00:00:00.000000+00')
+          ) AS seed(job, run_key, started_at)
+        `;
+        const runs = yield* JobRuns;
+        const first = yield* runs.page({ job: 'utf8', limit: 2 });
+        const second = yield* runs.page({
+          job: 'utf8',
+          limit: 2,
+          cursor: first.nextCursor ?? undefined,
+        });
+        const recentUtf8 = yield* runs.recent({ job: 'utf8', limit: 4 });
+        const farFirst = yield* runs.page({ job: 'far', limit: 1 });
+        const farSecond = yield* runs.page({
+          job: 'far',
+          limit: 1,
+          cursor: farFirst.nextCursor ?? undefined,
+        });
+        const recentTop = yield* runs.recent({ limit: 4 });
+        const pageTop = yield* runs.page({ limit: 4 });
+
+        // Verify the history index satisfies unfiltered keyset paging without a Sort node.
+        const plan = yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* sql`SET LOCAL enable_seqscan = off`;
+            return yield* sql`
+              EXPLAIN (FORMAT JSON)
+              SELECT job, run_key
+              FROM public.history_edge_runs
+              ORDER BY started_at DESC, run_key COLLATE "C" DESC, job COLLATE "C" DESC
+              LIMIT 3
+            `;
+          }),
+        );
+        return { first, second, recentUtf8, farFirst, farSecond, recentTop, pageTop, plan };
+      }),
+      buildTestLayer(url, prefix),
+    );
+    expect(result.first.runs.map(({ runKey }) => runKey)).toEqual(['\u{1F600}', '\uE000']);
+    expect(result.first.nextCursor).not.toBeNull();
+    expect(result.second.runs.map(({ runKey }) => runKey)).toEqual(['a', 'Z']);
+    expect(result.second.nextCursor).toBeNull();
+    expect(result.recentUtf8.map(({ runKey }) => runKey)).toEqual([
+      '\u{1F600}',
+      '\uE000',
+      'a',
+      'Z',
+    ]);
+    expect(result.farFirst.runs.map(({ runKey }) => runKey)).toEqual(['micro1']);
+    expect(result.farSecond.runs.map(({ runKey }) => runKey)).toEqual(['micro0']);
+    expect(result.farSecond.nextCursor).toBeNull();
+    expect(result.recentTop.map(({ job, runKey }) => [job, runKey])).toEqual(
+      result.pageTop.runs.map(({ job, runKey }) => [job, runKey]),
+    );
+    const planText = JSON.stringify(result.plan);
+    expect(planText).toContain('idx_history_edge_runs_history');
+    expect(planText).not.toContain('"Node Type":"Sort"');
+  });
+
+  it('handles edge-case limits and non-Postgres text filters safely in SQL history queries', async () => {
+    const result = await runDb(
+      Effect.gen(function* () {
+        const runs = yield* JobRuns;
+        const job = 'history-guards';
+        yield* runs.claim({
+          job,
+          runKey: 'has-\uFFFD',
+          trigger: 'manual',
+          force: false,
+          params: {},
+        });
+        yield* runs.claim({ job, runKey: 'plain', trigger: 'manual', force: false, params: {} });
+        const limits = [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.9, 1e20] as const;
+        const recent = yield* Effect.forEach(limits, (limit) => runs.recent({ job, limit }));
+        const paged = yield* Effect.forEach(limits, (limit) => runs.page({ job, limit }));
+        const loneSurrogateGet = yield* runs.get({ job, runKey: 'has-\uD800' });
+        const nulGet = yield* runs.get({ job, runKey: 'has-\0' });
+        const loneSurrogateRecent = yield* runs.recent({ job: 'bad-\uD800', limit: 5 });
+        const loneSurrogatePage = yield* runs.page({ job: 'bad-\uD800', limit: 5 });
+        const badCursorWithBadJob = yield* Effect.result(
+          runs.page({ job: 'bad-\uD800', limit: 5, cursor: '???' }),
+        );
+        return {
+          recent,
+          paged,
+          loneSurrogateGet,
+          nulGet,
+          loneSurrogateRecent,
+          loneSurrogatePage,
+          badCursorWithBadJob,
+        };
+      }),
+    );
+    expect(result.recent.map((rows) => rows.length)).toEqual([0, 0, 0, 0, 1, 2]);
+    expect(result.paged.map((page) => page.runs.length)).toEqual([0, 0, 0, 0, 1, 2]);
+    expect(result.loneSurrogateGet).toEqual(Option.none());
+    expect(result.nulGet).toEqual(Option.none());
+    expect(result.loneSurrogateRecent).toEqual([]);
+    expect(result.loneSurrogatePage).toEqual({ runs: [], nextCursor: null });
+    const badCursorFailure = Result.isFailure(result.badCursorWithBadJob)
+      ? result.badCursorWithBadJob.failure
+      : undefined;
+    expect(badCursorFailure?._tag).toBe('InvalidRunCursor');
+  });
+
   it('grants one Acquired and one Busy for two concurrent claims on the same key', async () => {
     const claims = await runDb(
       Effect.gen(function* () {
@@ -469,10 +705,14 @@ describe('JobRuns SQL ledger', () => {
         `;
       }),
     );
-    const exit = await Effect.runPromise(
+    const exits = await Effect.runPromise(
       Effect.gen(function* () {
         const runs = yield* JobRuns;
-        return yield* Effect.exit(runs.recent({ job: 'decode-defect', limit: 1 }));
+        return yield* Effect.all([
+          Effect.exit(runs.recent({ job: 'decode-defect', limit: 1 })),
+          Effect.exit(runs.get({ job: 'decode-defect', runKey: 'bad-trigger' })),
+          Effect.exit(runs.page({ job: 'decode-defect', limit: 1 })),
+        ]);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -483,11 +723,13 @@ describe('JobRuns SQL ledger', () => {
         Effect.scoped,
       ),
     );
-    expect(Exit.isFailure(exit)).toBe(true);
-    const cause = Exit.isFailure(exit) ? exit.cause : Cause.empty;
-    expect(Cause.hasFails(cause)).toBe(false);
-    const defect = Cause.findDefect(cause);
-    expect(Result.isSuccess(defect) && Schema.isSchemaError(defect.success)).toBe(true);
+    for (const exit of exits) {
+      expect(Exit.isFailure<unknown, unknown>(exit)).toBe(true);
+      const cause = Exit.isFailure<unknown, unknown>(exit) ? exit.cause : Cause.empty;
+      expect(Cause.hasFails(cause)).toBe(false);
+      const defect = Cause.findDefect(cause);
+      expect(Result.isSuccess(defect) && Schema.isSchemaError(defect.success)).toBe(true);
+    }
   });
 
   it('prunes more rows than one batch in several batches and counts them all', async () => {

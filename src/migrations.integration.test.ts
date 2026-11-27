@@ -100,7 +100,10 @@ afterAll(async () => {
 describe('JobStorage.layerMigrations', () => {
   it("creates only the library's tables on the search_path, then finds nothing to do", async () => {
     const url = await createDatabase(postgres, 'defaults');
-    expect(await applyJobs(url)).toEqual(['job_migrations:0001_create_tables']);
+    expect(await applyJobs(url)).toEqual([
+      'job_migrations:0001_create_tables',
+      'job_migrations:0002_add_runs_history_index',
+    ]);
     // No Cluster table anywhere: the application's Cluster is the application's to migrate.
     expect(await runSql(url, listTables)).toEqual([
       'public.job_migrations',
@@ -128,7 +131,10 @@ describe('JobStorage.layerMigrations', () => {
         ).pipe(Layer.provide(pool)),
       ).pipe(Effect.scoped, Effect.provide(quietLogger)),
     );
-    expect(await applyJobs(url, undefined, pool)).toEqual(['job_migrations:0001_create_tables']);
+    expect(await applyJobs(url, undefined, pool)).toEqual([
+      'job_migrations:0001_create_tables',
+      'job_migrations:0002_add_runs_history_index',
+    ]);
     expect(await runSql(url, listTables)).toEqual([
       'app.job_migrations',
       'app.job_requests',
@@ -153,7 +159,10 @@ describe('JobStorage.layerMigrations', () => {
       }),
     );
     const options = { schema: 'billing', prefix: 'task' };
-    expect(await applyJobs(url, options)).toEqual(['billing.task_migrations:0001_create_tables']);
+    expect(await applyJobs(url, options)).toEqual([
+      'billing.task_migrations:0001_create_tables',
+      'billing.task_migrations:0002_add_runs_history_index',
+    ]);
     expect(await runSql(url, listTables)).toEqual([
       'billing.task_migrations',
       'billing.task_requests',
@@ -168,7 +177,7 @@ describe('JobStorage.layerMigrations', () => {
     const url = await createDatabase(postgres, 'concurrent');
     const results = await Promise.all(Array.from({ length: 8 }, () => applyJobs(url)));
     expect(results.filter((applied) => applied.length > 0)).toEqual([
-      ['job_migrations:0001_create_tables'],
+      ['job_migrations:0001_create_tables', 'job_migrations:0002_add_runs_history_index'],
     ]);
     expect(results.filter((applied) => applied.length === 0)).toHaveLength(7);
   });
@@ -181,10 +190,26 @@ describe('JobStorage.layerMigrations', () => {
       component: 'jobs',
       table: 'job_migrations',
       found: 0,
-      expected: 1,
+      expected: 2,
     });
 
     await applyJobs(url);
+    expect(await buildError(storage)).toBe(undefined);
+
+    // A database at step 1 reads as behind until step 2 runs.
+    await runSql(
+      url,
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`DELETE FROM public.job_migrations WHERE migration_id = 2`;
+      }),
+    );
+    expect(await buildError(storage)).toMatchObject({
+      _tag: 'JobsNotMigratedError',
+      found: 1,
+      expected: 2,
+    });
+    expect(await applyJobs(url)).toEqual(['job_migrations:0002_add_runs_history_index']);
     expect(await buildError(storage)).toBe(undefined);
 
     // A history that lost its rows reads as behind.
@@ -196,9 +221,9 @@ describe('JobStorage.layerMigrations', () => {
       }),
     );
     const behind = await buildError(storage);
-    expect(behind).toMatchObject({ _tag: 'JobsNotMigratedError', found: 0, expected: 1 });
+    expect(behind).toMatchObject({ _tag: 'JobsNotMigratedError', found: 0, expected: 2 });
     expect(behind?.message).toBe(
-      'job_migrations is not migrated (found 0, needs 1). Run JobStorage.layerMigrations first.',
+      'job_migrations is not migrated (found 0, needs 2). Run JobStorage.layerMigrations first.',
     );
   });
 
@@ -278,8 +303,11 @@ describe('JobStorage.layerMigrations', () => {
     expect(await runSql(url, historyRows)).toBe(0);
 
     await runSql(url, rewriteLegacyTriggerCheck);
-    // Step 0001 is a no-op on the adopted tables.
-    expect(await applyJobs(url)).toEqual(['job_migrations:0001_create_tables']);
+    // Step 0001 is a no-op on the adopted tables; step 0002 adds the history index.
+    expect(await applyJobs(url)).toEqual([
+      'job_migrations:0001_create_tables',
+      'job_migrations:0002_add_runs_history_index',
+    ]);
     expect(await runSql(url, legacySnapshot)).toEqual({
       runs: [
         { job: 'legacy-daily', runKey: '2026-11-20', trigger: 'schedule', status: 'completed' },

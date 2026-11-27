@@ -400,6 +400,21 @@ export const JobRunRecord = Schema.Struct({
 export type JobRunRecord = typeof JobRunRecord.Type;
 
 /**
+ * Identifies a run ledger row by its composite key.
+ */
+export type JobRunKey = {
+  /**
+   * Job name (the ledger's `job` column).
+   */
+  readonly job: string;
+
+  /**
+   * Ledger run key (the `run_key` column).
+   */
+  readonly runKey: string;
+};
+
+/**
  * Query filter for `JobRuns.recent`.
  */
 export type RecentRunsQuery = {
@@ -412,4 +427,29 @@ export type RecentRunsQuery = {
    * Maximum number of rows returned, ordered newest first.
    */
   readonly limit: number;
+};
+
+/**
+ * Query filter for `JobRuns.page`.
+ */
+export type JobRunsPageQuery = RecentRunsQuery & {
+  /**
+   * Opaque cursor returned by a previous `JobRuns.page` call; omit for the first page.
+   */
+  readonly cursor?: string | undefined;
+};
+
+/**
+ * A page of run history and its continuation cursor.
+ */
+export type JobRunsPage = {
+  /**
+   * Run records ordered newest first.
+   */
+  readonly runs: ReadonlyArray<JobRunRecord>;
+
+  /**
+   * Pass to the next `JobRuns.page` call with the same job filter, or `null` at the end.
+   */
+  readonly nextCursor: string | null;
 };

@@ -106,6 +106,7 @@ Scope them per service with your exporter's resource attributes.
 | `JobsNotMigratedError`            | Runtime layers started against missing or older tables; `component`, `table`, `found`, `expected`                                                |
 | `JobStageError`                   | A failed durable stage, stored in Cluster's replies with a redacted message                                                                      |
 | `RunClaimLost`                    | A run whose heartbeat found another owner; it ends as a `failed` outcome                                                                         |
+| `InvalidRunCursor`                | `JobRuns.page` received a malformed continuation cursor                                                                                          |
 | `MigrationError`, `PgConfigError` | `JobStorage.layerMigrations` and invalid storage options (from `@yieldkit/pg`)                                                                   |
 
 They are tagged errors, so `Effect.catchTag` picks one out:

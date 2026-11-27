@@ -19,7 +19,7 @@ const TOKEN = '6f1c2a54-2d3b-4c1e-9a7f-0b8e5d4c3a21';
 const REQUEST_ID = '3d7e9b10-5a42-4f6c-8e21-7c9d0a1b2e43';
 
 /**
- * Answers the readiness check as migrated (history present at id 1) and every other statement with
+ * Answers the readiness check as migrated (history present at id 2) and every other statement with
  * `rows`.
  */
 const migratedResponder =
@@ -30,7 +30,7 @@ const migratedResponder =
     }
 
     if (sql.includes('MAX(migration_id)')) {
-      return [{ found: 1 }];
+      return [{ found: 2 }];
     }
 
     return rows;
@@ -107,6 +107,10 @@ describe('JobStorage SQL', () => {
     expect(sql).toContain("CHECK (trigger IN ('schedule', 'manual', 'api'))");
     expect(sql).toContain('CREATE INDEX IF NOT EXISTS "idx_task_runs_recent"');
     expect(sql).toContain('ON "app_jobs"."task_runs" (job, started_at DESC)');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS "idx_task_runs_history"');
+    expect(sql).toContain(
+      'ON "app_jobs"."task_runs" (started_at DESC, run_key COLLATE "C" DESC, job COLLATE "C" DESC)',
+    );
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS "app_jobs"."task_requests"');
     expect(sql).toContain('ALTER TABLE "app_jobs"."task_requests" ADD COLUMN IF NOT EXISTS');
     expect(sql).not.toMatch(/job_runs|job_requests|public/);
@@ -180,7 +184,9 @@ describe('JobStorage SQL', () => {
         annotations: Context.empty(),
       });
       yield* runs.isCompleted('sync', '2026-11-24');
+      yield* runs.get({ job: 'sync', runKey: '2026-11-24' });
       yield* runs.recent({ job: 'sync', limit: 5 });
+      yield* runs.page({ job: 'sync', limit: 5 });
       yield* runs.prune(['sync'], '1 day');
       const id = REQUEST_ID;
       yield* requests.create({ id, job: 'sync', params: {}, force: false, executionId: 'e' });
@@ -208,7 +214,7 @@ describe('JobStorage SQL', () => {
     const statements = dataStatements(recording.statements).filter(
       (sql) => !sql.includes('to_regclass') && !sql.includes('migration_id'),
     );
-    expect(statements.length).toBeGreaterThanOrEqual(19);
+    expect(statements.length).toBeGreaterThanOrEqual(21);
     for (const sql of statements) {
       expect(sql).toMatch(/"app_jobs"\."task_(runs|requests)"/);
       expect(sql).not.toMatch(/\bjob_runs\b|\bjob_requests\b/);
@@ -250,9 +256,9 @@ describe('JobStorage SQL', () => {
       component: 'jobs',
       table: 'app_jobs.task_migrations',
       found: 0,
-      expected: 1,
+      expected: 2,
       message:
-        'app_jobs.task_migrations is not migrated (found 0, needs 1). ' +
+        'app_jobs.task_migrations is not migrated (found 0, needs 2). ' +
         'Run JobStorage.layerMigrations first.',
     });
   });

@@ -1,11 +1,16 @@
+import type { Option } from 'effect';
 import type { SqlError } from 'effect/sql';
 
 import { Context, Duration, Effect, Schema } from 'effect';
 
+import type { InvalidRunCursor } from './errors.ts';
 import type { SqlLedgerContext } from './ledger-sql.ts';
 import type {
   ClaimRequest,
+  JobRunKey,
   JobRunRecord,
+  JobRunsPage,
+  JobRunsPageQuery,
   OwnedRun,
   RecentRunsQuery,
   RunClaim,
@@ -13,13 +18,8 @@ import type {
 } from './ledger-types.ts';
 import type { JobsPolicy } from './policy.ts';
 
-import {
-  claimRunSql,
-  heartbeatRunSql,
-  isRunCompletedSql,
-  queryRecentRunsSql,
-  settleRunSql,
-} from './ledger-sql.ts';
+import { getRunSql, pageRunsSql, queryRecentRunsSql } from './ledger-sql-history.ts';
+import { claimRunSql, heartbeatRunSql, isRunCompletedSql, settleRunSql } from './ledger-sql.ts';
 
 /**
  * Run ledger: `(job, run_key)` leases, fenced settles with the `onSettle` hook, history queries and
@@ -50,6 +50,12 @@ export class JobRuns extends Context.Service<
     ) => Effect.Effect<boolean, SqlError.SqlError>;
 
     /**
+     * Returns the row for `(job, runKey)`, or `None` when it is absent. As with `recent`, a row
+     * that fails to decode as `JobRunRecord` is a defect.
+     */
+    readonly get: (key: JobRunKey) => Effect.Effect<Option.Option<JobRunRecord>, SqlError.SqlError>;
+
+    /**
      * Returns `true` when `(job, runKey)` is stored with `status = 'completed'`.
      */
     readonly isCompleted: (
@@ -64,6 +70,15 @@ export class JobRuns extends Context.Service<
     readonly recent: (
       query: RecentRunsQuery,
     ) => Effect.Effect<ReadonlyArray<JobRunRecord>, SqlError.SqlError>;
+
+    /**
+     * Pages through run history by descending start time, run key and job. Ties use bytewise text
+     * ordering. Pass the returned cursor with the same job filter to continue. A malformed cursor
+     * fails with `InvalidRunCursor`; an undecodable ledger row is a defect.
+     */
+    readonly page: (
+      query: JobRunsPageQuery,
+    ) => Effect.Effect<JobRunsPage, SqlError.SqlError | InvalidRunCursor>;
 
     /**
      * Deletes rows of `jobs` that started more than `olderThan` ago, whatever their status, in
@@ -156,7 +171,9 @@ export const makeSqlJobRuns = (
     heartbeat: (run) => heartbeatRunSql(context, run, leaseMs),
     settle: (run, result) => settleRunSql(context, run, result),
     isCompleted: (job, runKey) => isRunCompletedSql(context, job, runKey),
+    get: (key) => getRunSql(context, key),
     recent: (query) => queryRecentRunsSql(context, query),
+    page: (query) => pageRunsSql(context, query),
     prune: (jobs, olderThan) =>
       pruneRunsSql(context, jobs, olderThan, policy.maintenance.batchSize),
     leaseDuration: policy.lease.duration,

@@ -245,6 +245,23 @@ export const backfill = runJob(syncOrders, { trigger: 'manual', params: { limit:
 );
 ```
 
+### Look up a run and page through history
+
+```ts
+import { JobRuns } from '@yieldkit/jobs';
+import { Effect } from 'effect';
+
+export const history = Effect.gen(function* () {
+  const runs = yield* JobRuns;
+  const job = 'sync-orders';
+  const run = yield* runs.get({ job, runKey: '2026-11-25T10:00Z' });
+  const page = yield* runs.page({ job, limit: 20 });
+  return { run, page };
+});
+```
+
+`get` returns `Option.none()` for a missing key. Pass `page.nextCursor` as `cursor` with the same job filter to load more history. A `null` cursor marks the last page. See [storage and the run ledger](docs/storage.md#jobruns).
+
 ### Record something in the same transaction as the settle
 
 <!-- prettier-ignore -->
