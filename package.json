@@ -1,6 +1,6 @@
 {
   "name": "@yieldkit/jobs",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Durable scheduled and on-demand jobs for Effect on PostgreSQL, on the Effect Cluster you bring: cron schedules, a fenced run ledger, retries and explicit migrations.",
   "keywords": [
     "cron",
