@@ -64,6 +64,11 @@ export type ResolvedStorage = {
   readonly runsRecentIndex: string;
 
   /**
+   * Index on `(started_at DESC, run_key COLLATE "C" DESC, job COLLATE "C" DESC)` of the run ledger.
+   */
+  readonly runsHistoryIndex: string;
+
+  /**
    * CHECK constraint on the run ledger's `status`.
    */
   readonly runsStatusCheck: string;
@@ -163,6 +168,7 @@ export const resolveStorage = Effect.fnUntraced(function* (
     migrationsTable: qualify(schema, `${prefix}_migrations`),
     migrationsTableName: `${prefix}_migrations`,
     runsRecentIndex: `idx_${prefix}_runs_recent`,
+    runsHistoryIndex: `idx_${prefix}_runs_history`,
     runsStatusCheck: `${prefix}_runs_status_check`,
     runsTriggerCheck: `${prefix}_runs_trigger_check`,
   };

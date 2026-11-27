@@ -227,3 +227,22 @@ export class JobsNotMigratedError extends Schema.TaggedError<
    */
   message: Schema.String,
 }) {}
+
+/**
+ * Raised by `JobRuns.page` when the continuation cursor is malformed.
+ */
+export class InvalidRunCursor extends Schema.TaggedError<
+  InvalidRunCursor,
+  {
+    /**
+     * Nominal marker: only values built by this class's constructor satisfy the type, never a
+     * structurally similar object.
+     */
+    readonly brand: unique symbol;
+  }
+>()('InvalidRunCursor', {
+  /**
+   * Description of the invalid cursor.
+   */
+  message: Schema.String,
+}) {}

@@ -14,6 +14,7 @@ describe('resolveStorage', () => {
       migrationsTable: 'job_migrations',
       migrationsTableName: 'job_migrations',
       runsRecentIndex: 'idx_job_runs_recent',
+      runsHistoryIndex: 'idx_job_runs_history',
       runsStatusCheck: 'job_runs_status_check',
       runsTriggerCheck: 'job_runs_trigger_check',
     });
@@ -45,6 +46,7 @@ describe('resolveStorage', () => {
   it('accepts the longest allowed prefix', async () => {
     const storage = await Effect.runPromise(resolveStorage({ prefix: 'a'.repeat(37) }));
     expect(storage.runsTriggerCheck.length).toBeLessThanOrEqual(63);
+    expect(storage.runsHistoryIndex.length).toBeLessThanOrEqual(63);
   });
 
   it("refuses Effect Cluster's default prefix, whose history Cluster storage also uses", async () => {

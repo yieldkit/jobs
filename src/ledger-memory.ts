@@ -1,4 +1,4 @@
-import { Clock, DateTime, Duration, Effect, Layer } from 'effect';
+import { Clock, DateTime, Duration, Effect, Layer, Option } from 'effect';
 import { SecureRandom } from 'effect/crypto';
 
 import type { ClusterConfigError } from './errors.ts';
@@ -8,13 +8,13 @@ import type {
   JobSettled,
   JobSettleHook,
   OwnedRun,
-  RecentRunsQuery,
   RunClaim,
   RunResult,
 } from './ledger-types.ts';
 import type { JobsPolicy, JobsPolicyOverrides, RetryPolicy } from './policy.ts';
 import type { BoundSettleHook } from './settle-hook.ts';
 
+import { cloneRunRecord, pageMemory, recentMemory, rowKey } from './ledger-memory-history.ts';
 import { failedNextAttemptAt } from './ledger-retry.ts';
 import { JobRuns } from './ledger.ts';
 import { decideClaim, resolveJobsPolicy } from './policy.ts';
@@ -98,11 +98,6 @@ export type JobRunsMemoryHarness<R = never> = {
    */
   readonly rows: () => ReadonlyArray<JobRunRecord>;
 };
-
-/**
- * Formats the composite `Map` key for `(job, runKey)`.
- */
-const rowKey = (job: string, runKey: string): string => `${job}\0${runKey}`;
 
 /**
  * Returns the row of `run` while it is still `running` under `run.token`, or `undefined` once it
@@ -376,27 +371,15 @@ export const makeJobRunsMemory = <R = never>(
           ),
         isCompleted: (job, runKey) =>
           Effect.sync(() => store.get(rowKey(job, runKey))?.record.status === 'completed'),
-        recent: (query: RecentRunsQuery) =>
+        get: ({ job, runKey }) =>
           Effect.sync(() => {
-            const limit = Math.max(0, Math.trunc(query.limit));
-            if (limit === 0) {
-              return [];
-            }
-
-            return [...store.values()]
-              .flatMap(({ record }) =>
-                query.job === undefined || record.job === query.job ? [record] : [],
-              )
-              .toSorted((left, right) => {
-                const timeDiff = right.startedAt.getTime() - left.startedAt.getTime();
-                if (timeDiff !== 0) {
-                  return timeDiff;
-                }
-
-                return right.runKey.localeCompare(left.runKey);
-              })
-              .slice(0, limit);
+            const existing = store.get(rowKey(job, runKey));
+            return existing === undefined
+              ? Option.none()
+              : Option.some(cloneRunRecord(existing.record));
           }),
+        recent: (query) => recentMemory(store, query),
+        page: (query) => pageMemory(store, query),
         prune: (jobs, olderThan) =>
           Effect.gen(function* () {
             if (jobs.length === 0) {
@@ -431,6 +414,6 @@ export const makeJobRunsMemory = <R = never>(
         }),
       ).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto)),
       settles: () => [...settleLog],
-      rows: () => [...store.values()].map((entry) => entry.record),
+      rows: () => [...store.values()].map((entry) => cloneRunRecord(entry.record)),
     };
   });

@@ -142,6 +142,20 @@ const createTables = (
   });
 
 /**
+ * Step 0002: index for keyset-paginated run history across all jobs.
+ */
+const addRunsHistoryIndex = (
+  storage: ResolvedStorage,
+): Effect.Effect<void, MigratorFailure, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = (yield* SqlClient.SqlClient).withoutTransforms();
+    yield* sql`
+      CREATE INDEX IF NOT EXISTS ${sql(storage.runsHistoryIndex)}
+      ON ${sql(storage.runsTable)} (started_at DESC, run_key COLLATE "C" DESC, job COLLATE "C" DESC)
+    `;
+  });
+
+/**
  * The library's migration loader for resolved names. New steps are appended with higher ids and
  * must stay idempotent. `Migrator` runs every pending step in one transaction, so a step that
  * rewrites a large table belongs in its own deploy step instead.
@@ -149,6 +163,7 @@ const createTables = (
 export const jobsMigrationLoader = (storage: ResolvedStorage): Migrator.Loader =>
   Migrator.fromRecord({
     '0001_create_tables': createTables(storage),
+    '0002_add_runs_history_index': addRunsHistoryIndex(storage),
   });
 
 /**

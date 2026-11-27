@@ -180,10 +180,10 @@ for (const entry of ['dist/index.js', 'dist/testing/index.js']) {
 // before any platform package is installed, so loading one would fail.
 writeFileSync(
   join(consumer, 'base.ts'),
-  `import { defineJob, durableStage, JobStorage, makeJobWorkflow, makeJobWorkflowLayer, makeSchedulerLayer, runJob, type JobSettled } from '${sourceManifest.name}';
+  `import { defineJob, durableStage, InvalidRunCursor, JobRuns, JobStorage, makeJobWorkflow, makeJobWorkflowLayer, makeSchedulerLayer, runJob, type JobRunsPageQuery, type JobSettled } from '${sourceManifest.name}';
 import { makeJobRequestsMemory, makeJobRunsMemory, makeTestClusterLayer } from '${sourceManifest.name}/testing';
 import { makePgLayer } from '@yieldkit/pg';
-import { Data, Effect, Fiber, Layer, Logger, Redacted, Schema } from 'effect';
+import { Data, Effect, Fiber, Layer, Logger, Option, Redacted, Result, Schema } from 'effect';
 import { ShardingConfig } from 'effect/cluster';
 import { SecureRandom } from 'effect/crypto';
 import { TestClock } from 'effect/testing';
@@ -257,7 +257,19 @@ const outcome = await Effect.runPromise(
     const runs = yield* makeJobRunsMemory({
       onSettle: (event) => Effect.sync(() => { events.push(event); }),
     });
-    return yield* runJob(job, { trigger: 'manual', params: { limit: 5 } }).pipe(Effect.provide(runs.layer));
+    const result = yield* runJob(job, { trigger: 'manual', params: { limit: 5 } }).pipe(Effect.provide(runs.layer));
+    const history = yield* Effect.gen(function* () {
+      const ledger = yield* JobRuns;
+      const query: JobRunsPageQuery = { job: job.name, limit: 10 };
+      const page = yield* ledger.page(query);
+      const found = page.runs[0] ? yield* ledger.get({ job: job.name, runKey: page.runs[0].runKey }) : Option.none();
+      const bad = yield* Effect.result(ledger.page({ job: job.name, limit: 1, cursor: '???' }));
+      return { page, found, bad };
+    }).pipe(Effect.provide(runs.layer));
+    if (history.page.runs.length !== 1 || Option.isNone(history.found) || Result.isSuccess(history.bad) || !Schema.is(InvalidRunCursor)(history.bad.failure)) {
+      throw new Error(\`Unexpected history read: \${JSON.stringify(history)}\`);
+    }
+    return result;
   }).pipe(Effect.provide(silent)),
 );
 if (outcome.status !== 'completed' || events[0]?.trigger !== 'manual') {
